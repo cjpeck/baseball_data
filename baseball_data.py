@@ -4,54 +4,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import scipy as sp
+import scipy.stats
 
 '''
 Git command line:
 
-git add 'experiment.py'
-git commit -m 'updated experiment.py'
-git remote add origin https://github.com/cjpeck/Mapping.git
+git add 'baseball_data.py'
+git commit -m 'initial commit'
+git remote add origin https://github.com/cjpeck/baseball_data.git
 git push -u origin master
 '''
-
-# Load data
-master_fname = '/Users/cjpeck/Dropbox/spyder2/baseball/lahman-csv_2015-01-24/Master.csv'
-ms = pd.DataFrame.from_csv(master_fname)
-
-batting_fname = '/Users/cjpeck/Dropbox/spyder2/baseball/lahman-csv_2015-01-24/Batting.csv'
-bt = pd.DataFrame.from_csv(batting_fname)
-bt['AVG'] = bt['H'] / bt['AB']
-bt['SLG'] = (bt['H'] + 1*bt['2B'] + 2*bt['3B'] + 3*bt['HR']) / bt['AB']
-
-pitching_fname = '/Users/cjpeck/Dropbox/spyder2/baseball/lahman-csv_2015-01-24/Pitching.csv'
-pt = pd.DataFrame.from_csv(pitching_fname)
-
-fielding_fname = '/Users/cjpeck/Dropbox/spyder2/baseball/lahman-csv_2015-01-24/Fielding.csv'
-fd = pd.DataFrame.from_csv(fielding_fname)
-
-team_fname = '/Users/cjpeck/Dropbox/spyder2/baseball/lahman-csv_2015-01-24/Teams.csv'
-tm = pd.DataFrame.from_csv(team_fname)
-
-sal = pd.DataFrame.from_csv(
-    '/Users/cjpeck/Dropbox/spyder2/baseball/lahman-csv_2015-01-24/Salaries.csv')
-       
-# error in the salaries CSV which includes teams 'SFG' and 'NYM' which
-# should instead be 'SFN' and 'NYN' - applies to 2014 only
-sal.ix[(sal.index=='2014') & (sal['teamID']=='NYM'), 'teamID'] = 'NYN'
-sal.ix[(sal.index=='2014') & (sal['teamID']=='SFG'), 'teamID'] = 'SFN'
-
-for year in range(bt['yearID'].min(), bt['yearID'].max() + 1):
-    bt_teams = bt.ix[bt['yearID']==year, 'teamID'].unique()
-    pt_teams = pt.ix[pt['yearID']==year, 'teamID'].unique()
-    fd_teams = fd.ix[fd['yearID']==year, 'teamID'].unique() 
-    tm_teams = tm[(tm.index==str(year))]['teamID'].unique()
-    sal_teams = sal[(sal.index==str(year))]['teamID'].unique()
-    n_teams = [len(bt_teams), len(pt_teams), len(fd_teams), len(tm_teams), len(sal_teams)]
-    if len(sal_teams)==0:
-        n_teams.pop()
-    if len(np.unique(n_teams)) > 1:
-        print(str(year), str(n_teams))
-    
 
 def get_team_stats(bt, pt, fd, tm):
        
@@ -75,7 +37,7 @@ def get_team_stats(bt, pt, fd, tm):
     keys = [x + '_bt' for x in bt_keys]
     keys += [x + '_pt' for x in pt_keys]
     keys += [x + '_fd' for x in fd_keys]
-    keys += ['salary']
+    keys += ['salary', 'n_over_2SD', 'n_over_3SD', 'n_over_4SD']
     
     indices = [[], []]
     remove = []
@@ -131,16 +93,25 @@ def get_team_stats(bt, pt, fd, tm):
             count = len(s)
 
             #append salaray information
-            salary = sal_year[sal_year['teamID']==team]['salary'].sum()
-            s =  s.append(pd.Series(salary, index=['salary']))
-            
+            team_data = sal_year[sal_year['teamID']==team]['salary']            
+            salary = float(team_data.sum())
+            mean = float(sal[str(year)].mean())
+            std = float(sal[str(year)].std()) 
+            n_over_2SD = (team_data >= mean + 2*std).sum()
+            n_over_3SD = (team_data >= mean + 3*std).sum()
+            n_over_4SD = (team_data >= mean + 4*std).sum()
+            s =  s.append(pd.Series([salary, n_over_2SD, n_over_3SD, n_over_4SD], 
+                                    index=['salary', 'n_over_2SD', 'n_over_3SD', 'n_over_4SD']))
+
             #append to dataframe
             dfx.ix[(year, team)] = s
-                
+            
     return dfx, dfy            
 
 ### ANALYSIS OF SALARY PREDICTING WINSS
 def salary_figures(dfx, dfy):
+    
+    directory = '/Users/cjpeck/Dropbox/spyder2/baseball/figures/'
     
     # parameters for sliding window regression    
     years = dfx.index.levels[0]
@@ -174,62 +145,117 @@ def salary_figures(dfx, dfy):
                      color='r', linestyle='-')
     plt.scatter(dfx_z['salary'], dfy['W'])
     plt.title('b1=%1.2f, p=%1.4f' % (beta[0], beta[3]))    
+    plt.savefig(directory + 'salary_wins.eps', bbox_inches='tight')
     plt.show()
     
-    # set up figure
-    plt.figure()
-    fig, ax = plt.subplots(nrows=2, ncols=2)
-    
     # mean salary as a function of year
-    plt.sca(ax[0,0])
+    plt.figure()
     plt.plot(years, dfx.mean(axis=0, level=0)/1e6)
     plt.xlabel('Year')
     plt.ylabel('Mean salary (millions $)')
-    
-    # change in z-score required as function of increase in wins desired
-    plt.sca(ax[0,1])
-    wins_desired = np.array([1, 5, 10, 20])
-    plt.plot(wins_desired, wins_desired / beta[0])
-    plt.xlabel('Increase in predicted wins')
-    plt.ylabel('Change in z-score')
-    fig.tight_layout()
+    plt.savefig(directory + 'mean_salary.eps', bbox_inches='tight')
+    plt.show()
     
     # change in z-score as function to time (sliding window regression) to win
     # 'wins_desired' more games
-    plt.sca(ax[1,0])
-    wins_desired = 10
+    plt.figure()
+    wins_desired = 4
     money_needed = wins_desired / np.array(beta_sliding)
     plt.plot(np.mean(np.c_[tStart, tEnd], 1), money_needed)
     plt.xlabel('Year')
     plt.ylabel('Change in z-score, to get %d wins' % wins_desired)
+    plt.savefig(directory + 'year_wins.eps', bbox_inches='tight')
+    plt.show()
     
     # salary as a function of year for common z-scores
-    z_vals = np.array([-2, -1, 0, 1, 2])
+    z_vals = np.array([0, 1, 2])
     z_chart = pd.DataFrame()
     for i in z_vals:
         z_chart[i] = (dfx.mean(level=0)['salary'] + 
                       dfx.std(level=0)['salary'] * i) / 1e6
-    plt.sca(ax[1,1])
-    plt.plot(z_chart)
+    z_chart.plot()
     plt.xlabel('Year')
-    plt.ylabel('Salary')
-    
+    plt.ylabel('Salary')    
+    plt.savefig(directory + 'year_salary.eps', bbox_inches='tight')
     plt.show()
-    
-    # save
-    directory = '/Users/cjpeck/Dropbox/spyder2/baseball/figures'
-    plt.savefig(directory + 'salary.eps', bbox_inches='tight')
-    
+
     # how does salary increase predict an increase in probability of winning
     # the World Series
-    winner = dfy['WSWin'] == 'Y'
-    prob = []
-    z_vals = np.linspace(dfx_z['salary'].min(), dfx_z['salary'].max(), 100)
-    for z in z_vals:
-        prob.append(np.sum(winner[dfx_z['salary'] <= z]) / len(years))
-    plt.plot(z_vals, prob)
+    plt.figure()
+    
+    keys = ['DivWin', 'WCWin', 'LgWin', 'WSWin']
+    nkeys = ['nDivWin', 'nWCWin', 'nLgWin', 'nWSWin']
+    
+    bin_size = 10 # need to be an int divisble by 2 and a factor of 100
+    x_vals = list(range(int(bin_size/2), 100, bin_size))
+    df = pd.DataFrame(index=x_vals, columns=keys+nkeys)
+    for i in range(len(x_vals)):
+        lb = np.percentile(dfx_z['salary'], i * bin_size)
+        ub = np.percentile(dfx_z['salary'], (i+1) * bin_size)        
+        winners = dfy.ix[(dfx_z['salary'] > lb) & (dfx_z['salary'] <= ub), keys] == 'Y'
+        losers = dfy.ix[(dfx_z['salary'] > lb) & (dfx_z['salary'] <= ub), keys] == 'N'
+        n = winners.sum().add(losers.sum())
+        df.ix[x_vals[i], keys] = winners.sum().divide(n)  
+        df.ix[x_vals[i], nkeys] = n.rename({keys[i]: nkeys[i] for i in range(len(n))})    
+    df[keys].plot(xlim=[0,100])
+    plt.savefig(directory + 'playoff_prob.eps', bbox_inches='tight')
+    
 
-   
+    plt.figure()
+    x2 = dfx['n_over_2SD'] + (.1 * np.random.random(size=(len(dfx),)) - 0.05)
+    x3 = dfx['n_over_3SD'] + (.1 * np.random.random(size=(len(dfx),)) - 0.05)
+    x4 = dfx['n_over_4SD'] + (.1 * np.random.random(size=(len(dfx),)) - 0.05)
+    plt.scatter(x2, dfy['W'], c='b', s=5)
+    plt.scatter(x3, dfy['W'], c='r')
+    plt.scatter(x4, dfy['W'], c='g')
+    b2 = sp.stats.linregress(x2, dfy['W'])
+    b3 = sp.stats.linregress(x3, dfy['W'])
+    b4 = sp.stats.linregress(x4, dfy['W'])
+    plt.show()
+
 if __name__ == '__main__':
+    
+    # Load data
+    master_fname = '/Users/cjpeck/Dropbox/spyder2/baseball/lahman-csv_2015-01-24/Master.csv'
+    ms = pd.DataFrame.from_csv(master_fname)
+    
+    batting_fname = '/Users/cjpeck/Dropbox/spyder2/baseball/lahman-csv_2015-01-24/Batting.csv'
+    bt = pd.DataFrame.from_csv(batting_fname)
+    bt['AVG'] = bt['H'] / bt['AB']
+    bt['SLG'] = (bt['H'] + 1*bt['2B'] + 2*bt['3B'] + 3*bt['HR']) / bt['AB']
+    
+    pitching_fname = '/Users/cjpeck/Dropbox/spyder2/baseball/lahman-csv_2015-01-24/Pitching.csv'
+    pt = pd.DataFrame.from_csv(pitching_fname)
+    
+    fielding_fname = '/Users/cjpeck/Dropbox/spyder2/baseball/lahman-csv_2015-01-24/Fielding.csv'
+    fd = pd.DataFrame.from_csv(fielding_fname)
+    
+    team_fname = '/Users/cjpeck/Dropbox/spyder2/baseball/lahman-csv_2015-01-24/Teams.csv'
+    tm = pd.DataFrame.from_csv(team_fname)
+    
+    sal = pd.DataFrame.from_csv(
+        '/Users/cjpeck/Dropbox/spyder2/baseball/lahman-csv_2015-01-24/Salaries.csv')
+           
+    # error in the salaries CSV which includes teams 'SFG' and 'NYM' which
+    # should instead be 'SFN' and 'NYN' - applies to 2014 only
+    sal.ix[(sal.index==pd.Timestamp('2014-01-01')) & 
+           (sal['teamID']=='NYM'), 'teamID'] = 'NYN'
+    sal.ix[(sal.index==pd.Timestamp('2014-01-01')) &
+           (sal['teamID']=='SFG'), 'teamID'] = 'SFN'
+    
+    for year in range(bt['yearID'].min(), bt['yearID'].max() + 1):
+        bt_teams = bt.ix[bt['yearID']==year, 'teamID'].unique()
+        pt_teams = pt.ix[pt['yearID']==year, 'teamID'].unique()
+        fd_teams = fd.ix[fd['yearID']==year, 'teamID'].unique() 
+        tm_teams = tm.ix[str(year), 'teamID'].unique()
+        n_teams = [len(bt_teams), len(pt_teams), len(fd_teams), len(tm_teams)]
+        if str(year) in sal.index:
+            sal_teams = sal.ix[str(year), 'teamID'].unique()
+            n_teams.append(len(sal_teams))
+        if len(np.unique(n_teams)) > 1:
+            print(str(year), str(n_teams))
+        
+        
     dfx, dfy = get_team_stats(bt, pt, fd, tm)
     salary_figures(dfx, dfy)
+
