@@ -15,7 +15,7 @@ import scipy.stats
 class BaseballData(object):
     
     def __init__(self):
-        self.tFrame = [1985, 2014]        
+        self.tFrame = [1960, 2014]        
         self.directory = '/Users/cjpeck/Dropbox/spyder2/baseball/mydata/'       
         
     def create_df(self):                
@@ -37,15 +37,6 @@ class BaseballData(object):
         # team data
         team_fname = '/Users/cjpeck/Dropbox/spyder2/baseball/lahman-csv_2015-01-24/Teams.csv'
         tm = pd.DataFrame.from_csv(team_fname)
-        # salary data
-        #   -error in the salaries CSV which includes teams 'SFG' and 'NYM' which
-        #   should instead be 'SFN' and 'NYN' - applies to 2014 only
-        sal = pd.DataFrame.from_csv(
-            '/Users/cjpeck/Dropbox/spyder2/baseball/lahman-csv_2015-01-24/Salaries.csv')                    
-        sal.ix[(sal.index==pd.Timestamp('2014-01-01')) & 
-               (sal['teamID']=='NYM'), 'teamID'] = 'NYN'
-        sal.ix[(sal.index==pd.Timestamp('2014-01-01')) &
-               (sal['teamID']=='SFG'), 'teamID'] = 'SFN'
                                  
         # years of interest
         years = list(range(self.tFrame[0], self.tFrame[1]+1))
@@ -54,7 +45,7 @@ class BaseballData(object):
         remove = []
         for year in years:
             tm_year = tm[str(year)]
-            if np.sum(tm_year['G'] < 160):
+            if tm_year['G'].mean() < 160:
                 print('skipping year ' + str(year))
                 remove.append(year)
                 continue
@@ -80,7 +71,6 @@ class BaseballData(object):
         self.dfy = pd.DataFrame(index=indices, columns=tm_keys)  
         for year in years:
             tm_year = tm[str(year)]
-            sal_year =  sal[str(year)]            
             bt_year = bt[bt['yearID']==year]
             pt_year = pt[pt['yearID']==year]
             fd_year = fd[fd['yearID']==year]
@@ -106,14 +96,22 @@ class BaseballData(object):
                 s = s.append(team_data[fd_keys].sum(skipna=True))  
                 s.index = [s.index[i] + '_fd' if i >= count else s.index[i] 
                            for i in range(len(s))]
-                count = len(s)    
-                #append salaray information
-                team_data = sal_year[sal_year['teamID']==team]['salary']            
-                salary = float(team_data.sum())                
-                s =  s.append(pd.Series([salary], index=['salary']))    
+                count = len(s) 
                 #append to dataframe
                 self.dfx.ix[(year, team)] = s
                 
+    def get_predictors(self):
+        ''' Return dataframe for doing the analysis 
+            
+            Some less informative correlations:
+            -'AB_bt' is negatively correlated with wins
+            -'IPouts_pt' is positively correlated with wins
+            -'SV_pt' is positively correlated with wins
+            -'BFP_pt' is positively correlated with wins
+            ** most stats should be considered as rate per 'AB' or 'G'            
+        '''
+        pass
+    
     def save_df(self):
         with open(self.directory + 'predictors.pickle', 'wb') as f:        
             pickle.dump(self.dfx, f, pickle.HIGHEST_PROTOCOL)
@@ -128,12 +126,14 @@ class BaseballData(object):
             
     def normalize_predictors(self):
         #normalize
-        self.dfx_z = \
+        self.dfx = \
             self.dfx.apply(lambda x: (x - self.dfx.ix[x.name[0]].mean()) / 
                                       self.dfx.ix[x.name[0]].std(), axis=1)
                                       
 if __name__ == '__main__':
     b = BaseballData()
-    b.create_df()
+    b.create_df()    
+    b.normalize_predictors()
     b.save_df()           
     b.load_df()
+    
